@@ -7,6 +7,7 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 import sys
+import csv
 
 # 配置常量
 DEFAULT_IPC = 'A23P20/17'
@@ -26,7 +27,7 @@ current_dir = get_base_dir()
 # 设置文件路径为 dist/wipo_arm 目录
 base_dir = os.path.dirname(current_dir)  # 获取上级目录
 LOG_FILE = os.path.join(base_dir, 'wipo_ipcs_list_logs.txt')
-DATA_FILE = os.path.join(base_dir, 'wipo_data.json')
+DATA_FILE = os.path.join(base_dir, 'wipo_data.csv')
 IPC_LIST_FILE = os.path.join(base_dir, 'wipo_ipcs_list.txt')
 
 print(f"Log file path: {LOG_FILE}")
@@ -91,33 +92,65 @@ def handle_data(html):
     text = Selector(html)
     eles = text.xpath('//tbody[@id="resultListForm:resultTable_data"]/tr')
     print(f'大小 {len(eles)}')
-    
+    try:
+        page = text.css('.ps-paginator--page--value').xpath('string(.)').get().replace('\n', '')
+    except Exception as e:
+        page = "没有数据"
     data_list = []
     for ele in eles:
         name = ele.css('span.ps-patent-result--title--title.content--text-wrap').xpath('string(.)').get().strip() if ele.css('span.ps-patent-result--title--title.content--text-wrap') else ''
+        data_rk = ele.css('tr::attr(data-rk)').get()
+        data_ri = ele.css('tr::attr(data-ri)').get()
+        pubdate = ele.css('div.ps-patent-result--title--ctr-pubdate').xpath('string(.)').get().strip()
         serial_number = ele.css('span.notranslate.ps-patent-result--title--record-number').xpath('string(.)').get().strip() if ele.css('span.notranslate.ps-patent-result--title--record-number') else ''
         detail_url = 'https://patentscope.wipo.int/search/zh/' + ele.css('div.ps-patent-result--first-row a::attr(href)').get() if ele.css('div.ps-patent-result--first-row a') else ''
+        ipc = ele.xpath('.//div[@id="resultListForm:resultTable:0:patentResult"]/@data-mt-ipc').get().strip() if ele.xpath('.//div[@id="resultListForm:resultTable:0:patentResult"]') else ''
+        application_number = ele.xpath('.//span[contains(text(), "申请号")]/following-sibling::span').xpath('string(.)').get().strip() if ele.xpath('.//span[contains(text(), "申请号")]/following-sibling::span') else ''
+        application_people = ele.xpath('.//span[contains(text(), "申请人")]/following-sibling::span').xpath('string(.)').get().strip() if ele.xpath('.//span[contains(text(), "申请人")]/following-sibling::span') else ''
+        inventor = ele.xpath('.//span[contains(text(), "发明人")]/following-sibling::span').xpath('string(.)').get().strip() if ele.xpath('.//span[contains(text(), "发明人")]/following-sibling::span') else ''
+        introduction = ele.xpath('.//span[@class="trans-section needTranslation-biblio"]').xpath('string(.)').get().strip() if ele.xpath('.//span[@class="trans-section needTranslation-biblio"]') else ''
         
         data_dict = {
             'name': name,
+            'data_rk': data_rk,
+            'data_ri': data_ri,
+            'ipc': ipc,
+            'pubdate': pubdate,
             'serial_number': serial_number,
             'detail_url': detail_url,
+            'application_number': application_number,
+            'application_people': application_people,
+            'inventor': inventor,
+            'page': page,
+            'introduction': introduction
         }
+        print(data_dict)
         data_list.append(data_dict)
 
-    save_data_to_file(data_list)
-    return len(data_list)
+    # if data_list:
+        # save_data_to_file(data_list)
+    return page
 
 def save_data_to_file(data_list):
-    """将数据保存到文件"""
-    if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'w') as f:
-            json.dump([], f)
-    with open(DATA_FILE, 'r+') as f:
-        file_data = json.load(f)
-        file_data.extend(data_list)
-        f.seek(0)
-        json.dump(file_data, f, ensure_ascii=False)
+    """Save data to a CSV file based on dictionary keys in the list"""
+    if not data_list:
+        return  # Exit if the list is empty
+
+    file_exists = os.path.exists(DATA_FILE)
+
+    # Use the keys from the first dictionary as the fieldnames for the CSV file
+    fieldnames = data_list[0].keys()
+
+    # Open the CSV file in append mode and write rows
+    with open(DATA_FILE, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+        # Write the header only if the file is new
+        if not file_exists:
+            writer.writeheader()
+
+        # Write each dictionary in the list as a row in the CSV file
+        writer.writerows(data_list)
 
 def producer():
     """生产者任务"""
