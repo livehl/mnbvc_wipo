@@ -1,16 +1,16 @@
-import threading
+import _thread
+import random
 import time
 import queue
-from DrissionPage import ChromiumPage
-from parsel import Selector
+import traceback
+
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
 import sys
-import csv
+import pickle
+
 
 # 配置常量
-DEFAULT_IPC = 'A23P20/17'
 URL = 'https://patentscope.wipo.int/search/zh/search.jsf'
 PAGE_LIMIT = 200
 
@@ -19,75 +19,77 @@ def get_base_dir():
         print(f"Running in bundled mode, base directory: {sys._MEIPASS}")
         return sys._MEIPASS
     print(f"Running in normal mode, base directory: {os.path.dirname(os.path.abspath(__file__))}")
-    return os.path.dirname(os.path.abspath(__file__))
+    fp= os.path.dirname(os.path.abspath(__file__))
+    print(fp)
+    if fp.endswith(".pyz"):
+        fp= os.path.dirname(fp)
+    return fp
 
 # 获取当前脚本所在的目录
 current_dir = get_base_dir()
 
 # 设置文件路径为 dist/wipo_arm 目录
-base_dir = os.path.dirname(current_dir)  # 获取上级目录
-LOG_FILE = os.path.join(base_dir, 'wipo_ipcs_list_logs.txt')
+base_dir = current_dir#os.path.dirname(current_dir)  # 获取上级目录
 DATA_FILE = os.path.join(base_dir, 'wipo_data.csv')
 IPC_LIST_FILE = os.path.join(base_dir, 'wipo_ipcs_list.txt')
+STAT_DICT= {"list":[],"idx":0,"task":"ipc"}
+if os.path.exists("_tmp_/stat.data"):
+    with open("_tmp_/stat.data", "rb") as f:
+        STAT_DICT = pickle.load(f)
 
-print(f"Log file path: {LOG_FILE}")
+
 print(f"Data file path: {DATA_FILE}")
 print(f"IPC list file path: {IPC_LIST_FILE}")
+with open(IPC_LIST_FILE, 'r') as f:
+    ALL_IPC = [i.replace(" ","").replace("\n","") for i in f.readlines()]
+if len(STAT_DICT["list"]) == 0:
+    STAT_DICT["idx"] = 0
+else:
+    if "IPC" not in  STAT_DICT or ALL_IPC[STAT_DICT["idx"]-1] !=STAT_DICT["IPC"]:
+        print("reset idx", STAT_DICT["idx"],STAT_DICT["IPC"])
+        idx=ALL_IPC.index(STAT_DICT["list"][-1])
+        STAT_DICT["idx"] =idx
+    else:
+        STAT_DICT["idx"] -=1
+# 创建一个队列，最大大小为10
+print("读取所有分类,总数:",len(ALL_IPC),"当前索引位置:",STAT_DICT["idx"])
+q = queue.Queue()
 
-# 创建一个队列，最大大小为5
-q = queue.Queue(maxsize=5)
-web = ChromiumPage()
 
-def get_last_ipc():
-    """从文件中读取最后处理的 IPC"""
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, 'r') as f:
-            lines = f.readlines()
-            if lines:
-                return lines[-1].strip().replace(' ', '')  # 返回最后一行 IPC
-    return None
+# def initialize_web():
+#     """初始化网页"""
+#     web.get(URL)
+#     web.ele('@value=CLASSIF').click()
+#     # web.ele('#simpleSearchForm:fpSearch:input').input(get_next_ipc(), clear=True)
+#     # time.sleep(30)
+#     # web.ele('#simpleSearchForm:fpSearch:buttons').click()
+#     time.sleep(10)
+#     web.ele('@value=200', -1).click()
+#     web.wait.load_start()
+#     print('开始爬取')
 
-def initialize_web():
-    """初始化网页"""
-    web.get(URL)
-    web.ele('@value=CLASSIF').click()
-    web.ele('#simpleSearchForm:fpSearch:input').input(get_last_ipc() or DEFAULT_IPC, clear=True)
-    web.ele('#simpleSearchForm:fpSearch:buttons').click()
-    time.sleep(5)
-    web.ele('@value=200', -1).click()
-    web.wait.load_start()
-    print('开始爬取')
-
-def add_to_logs(ipc_):
+def save_status():
+    """保存状态"""
+    with open("_tmp_/stat.data", "wb+") as f:
+        pickle.dump(STAT_DICT, f)
+def add_ok_ipc(ipc_):
     """记录处理的 IPC"""
-    with open(LOG_FILE, 'a') as f:
-        f.write(ipc_ + '\n')
+    STAT_DICT["list"].append(ipc_)
+    save_status()
+    with open("data/stat.json", "w+") as f:
+        json.dump(STAT_DICT, f)
 
-def remove_from_logs(ipc_):
-    """从日志中移除 IPC"""
-    # 检查日志文件是否存在，如果不存在则创建一个空文件
-    if not os.path.exists(LOG_FILE):
-        print(f"日志文件不存在，正在创建: {LOG_FILE}")
-        with open(LOG_FILE, 'w') as f:
-            f.write('')  # 创建一个空文件
-    with open(LOG_FILE, 'r') as f:
-        lines = f.readlines()
-    with open(LOG_FILE, 'w') as f:
-        f.writelines([line for line in lines if line.strip() != ipc_])
-
-def pop_from_list():
+def get_next_ipc():
     """从 IPC 列表中弹出下一个 IPC"""
-    if os.path.exists(IPC_LIST_FILE):
-        with open(IPC_LIST_FILE, 'r') as f:
-            lines = f.readlines()
-        if lines:
-            ipc_ = lines[0].strip()
-            with open(IPC_LIST_FILE, 'w') as f:
-                f.writelines(lines[1:])
-            return ipc_
-    return None
+    data=ALL_IPC[STAT_DICT["idx"]]
+    STAT_DICT["idx"]+=1
+    STAT_DICT["IPC"]=data
+    if data not in STAT_DICT:
+        STAT_DICT[data]={"page":0,"all_page":0}
+    save_status()
+    return data
 
-def handle_data(html):
+def handle_data(html,ipc):
     """处理网页数据"""
     text = Selector(html)
     eles = text.xpath('//tbody[@id="resultListForm:resultTable_data"]/tr')
@@ -104,7 +106,7 @@ def handle_data(html):
         pubdate = ele.css('div.ps-patent-result--title--ctr-pubdate').xpath('string(.)').get().strip()
         serial_number = ele.css('span.notranslate.ps-patent-result--title--record-number').xpath('string(.)').get().strip() if ele.css('span.notranslate.ps-patent-result--title--record-number') else ''
         detail_url = 'https://patentscope.wipo.int/search/zh/' + ele.css('div.ps-patent-result--first-row a::attr(href)').get() if ele.css('div.ps-patent-result--first-row a') else ''
-        ipc = ele.xpath('.//div[@id="resultListForm:resultTable:0:patentResult"]/@data-mt-ipc').get().strip() if ele.xpath('.//div[@id="resultListForm:resultTable:0:patentResult"]') else ''
+        # ipc = ele.xpath('.//div[@id="resultListForm:resultTable:0:patentResult"]/@data-mt-ipc').get().strip() if ele.xpath('.//div[@id="resultListForm:resultTable:0:patentResult"]') else ''
         application_number = ele.xpath('.//span[contains(text(), "申请号")]/following-sibling::span').xpath('string(.)').get().strip() if ele.xpath('.//span[contains(text(), "申请号")]/following-sibling::span') else ''
         application_people = ele.xpath('.//span[contains(text(), "申请人")]/following-sibling::span').xpath('string(.)').get().strip() if ele.xpath('.//span[contains(text(), "申请人")]/following-sibling::span') else ''
         inventor = ele.xpath('.//span[contains(text(), "发明人")]/following-sibling::span').xpath('string(.)').get().strip() if ele.xpath('.//span[contains(text(), "发明人")]/following-sibling::span') else ''
@@ -127,81 +129,145 @@ def handle_data(html):
         print(data_dict)
         data_list.append(data_dict)
 
-    # if data_list:
-        # save_data_to_file(data_list)
+    if data_list:
+        save_info_data_to_file(data_list,ipc)
     return page
 
-def save_data_to_file(data_list):
+def save_info_data_to_file(data_list,ipc):
     """Save data to a CSV file based on dictionary keys in the list"""
     if not data_list:
         return  # Exit if the list is empty
+    fn_name=ipc.replace("/","_")
+    with open("data/"+fn_name+".jsonl", 'a+', newline='', encoding='utf-8') as f:
+        for d in data_list:
+            f.write(json.dumps(d, ensure_ascii=False)+"\n")
 
-    file_exists = os.path.exists(DATA_FILE)
-
-    # Use the keys from the first dictionary as the fieldnames for the CSV file
-    fieldnames = data_list[0].keys()
-
-    # Open the CSV file in append mode and write rows
-    with open(DATA_FILE, 'a', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-
-        # Write the header only if the file is new
-        if not file_exists:
-            writer.writeheader()
-
-        # Write each dictionary in the list as a row in the CSV file
-        writer.writerows(data_list)
-
-def producer():
-    """生产者任务"""
-    ipc_ = get_last_ipc() or DEFAULT_IPC
+def page_init(web,ipc):
+    web.get(URL)
+    web.ele('@value=CLASSIF').click()
+    web.ele('#simpleSearchForm:fpSearch:input').input(ipc, clear=True)
+    web.ele('#simpleSearchForm:fpSearch:buttons').click()
+    web.wait.load_start(timeout=20)
+    print("double")
+    web.ele("#resultListCommandsForm:viewType:input").click()
+    time.sleep(1)
+    web.ele("#resultListCommandsForm:viewType:input").select("双")  # DOUBLE_VIEW
+    web.wait.load_start(timeout=5)
+    print("200")
+    web.ele("#resultListCommandsForm:perPage:input").click()
+    time.sleep(1)
+    web.ele("#resultListCommandsForm:perPage:input").select("200")
+    web.wait.load_start(timeout=5)
+def loop_get_page_html():
+    """页面爬取"""
+    ipc_ = get_next_ipc()
+    page_init(web,ipc_)
+    if ipc_ in STAT_DICT:#恢复页面
+        print(STAT_DICT[ipc_])
+        if STAT_DICT[ipc_]['page']<99 and STAT_DICT[ipc_]['all_page']>1:
+            print(f"恢复: {STAT_DICT[ipc_]['page']}")
+            web.ele('xpath://a[@aria-label="单击以转至特定页面"]').click()
+            time.sleep(0.5)
+            web.ele(f"xpath:/html/body/div[2]/div[2]/div/div/div/form/input[2]").input(str(STAT_DICT[ipc_]['page']-1), clear=True)
+            time.sleep(0.5)
+            web.ele("xpath:/html/body/div[2]/div[2]/div/div/div/form/button").click()
+            time.sleep(1)
+            web.wait.load_start(timeout=10)
     while True:
-        if not q.full():
-            q.put(web.html)
+        if True:
+            q.put((web.html,ipc_),block=False)
+            page=0
+            all_page=0
             try:
-                page = web.ele('.ps-paginator--page--value').raw_text.replace('\n', '')
+                raw_page=web.ele('.ps-paginator--page--value',timeout=1).raw_text.replace('\n', '')
+                page = int(raw_page.split("/")[0])
+                all_page=int(raw_page.split("/")[1])
+                STAT_DICT[ipc_]['page']=page
+                STAT_DICT[ipc_]['all_page']=all_page
+                save_status()
                 print(f"生产: {page}")
             except Exception as e:
                 print(f'没有数据: {e}')
                 
-            ele = web.ele('xpath://a[@aria-label="下一页"]', timeout=5)
+            ele = web.ele('xpath://a[@aria-label="下一页"]', timeout=1)
             if not ele:
+                add_ok_ipc(ipc_)
                 print('移除')
                 print(ipc_)
-                remove_from_logs(ipc_)
                 print('读取')
-                ipc_ = pop_from_list()
+                ipc_ = get_next_ipc()
                 if not ipc_:
                     print("没有更多 IPC，结束生产者")
                     break
-                add_to_logs(ipc_)
-                web.ele('#advancedSearchForm:advancedSearchInput:input').input('IC:(' + ipc_.replace(' ', '') + ')', clear=True, by_js=True)
-                web.ele('#advancedSearchForm:advancedSearchInput:buttons').click()
-                web.wait.load_start()
+                while True:#一直重试
+                    try:
+                        if not web.url.startswith("https://patentscope.wipo.int/search/zh/result.jsf"):
+                            page_init(web,ipc_)
+                            break
+                        else:
+                            web.ele('#advancedSearchForm:advancedSearchInput:input',timeout=5).input(ipc_, clear=True)
+                            web.ele('#advancedSearchForm:advancedSearchInput:buttons',timeout=5).click()
+                            web.ele("@value=200").click()
+                            web.ele("@value=DOUBLE_VIEW").click()
+                            break
+                    except Exception:
+                        traceback.print_exc()
+                web.wait.load_start(timeout=10)
             else:
+                print("page",page,all_page)
                 ele.click()
-                web.wait.load_start()
+                if page>0:
+                    while True:#快速翻页
+                        try:
+                            new_page = int(web.ele('.ps-paginator--page--value',timeout=5).raw_text.replace('\n', '').split("/")[0])
+                            if new_page !=page:break
+                            time.sleep(0.3)
+                        except Exception as e:
+                            traceback.print_exc()
+                else:
+                    web.wait.load_start(timeout=10)
         else:
             print("队列已满，生产者等待...")
-        time.sleep(2)
+        time.sleep(random.randint(1,10)/10)
 
-def consumer():
+def page_parser():
     """消费者任务"""
     while True:
         if not q.empty():
-            item = q.get()
-            data_size = handle_data(item)
-            print(f"消费: {data_size} 条数据")
-            q.task_done()
-        else:
-            print("队列已空，消费者等待...")
-        time.sleep(5)
+            item,ipc = q.get()
+            try:
+                data_size = handle_data(item,ipc)
+                print(f"处理: {data_size} 条数据")
+                q.task_done()
+            except Exception as e:
+                traceback.print_exc()
+                print(item)
+                continue
+        time.sleep(0.1)
+
+def main():
+    try:
+        from DrissionPage import ChromiumPage
+        from parsel import Selector
+    except Exception:
+        print("没有安装依赖，安装并重启")
+        import subprocess
+        subprocess.run([sys.executable, '-m', 'pip', 'install',"-i","https://mirrors.aliyun.com/pypi/simple/ ", 'DrissionPage', 'parsel'])
+        subprocess.run([sys.executable, sys.argv[0]])
+        exit(0)
+    global web
+    web = ChromiumPage()
+    if not os.path.exists("data"):
+        os.mkdir("data")
+    if not os.path.exists("_tmp_"):
+        os.mkdir("_tmp_")
+    _thread.start_new_thread(page_parser, ())
+    loop_get_page_html()
 
 if __name__ == '__main__':
     # 初始化网页
-    initialize_web()
-
-    # 使用线程池执行生产者和消费者任务
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        executor.submit(producer)
-        executor.submit(consumer)
+    # initialize_web()
+    # for i in range(5):
+    # print(sys.executable,sys.argv)
+    #检查依赖有没有，没有就安装并重启
+    main()
