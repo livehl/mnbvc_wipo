@@ -229,6 +229,7 @@ def loop_get_page_html():
         else:
             print("队列已满，生产者等待...")
         time.sleep(random.randint(1,10)/10)
+    print("已经完成所有任务，请打包交付。")
 
 def page_parser():
     """消费者任务"""
