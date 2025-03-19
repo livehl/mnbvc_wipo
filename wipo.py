@@ -199,6 +199,7 @@ def loop_get_page_html():
                 if not ipc_:
                     print("没有更多 IPC，结束生产者")
                     break
+                err_count = 0
                 while True:#一直重试
                     try:
                         if not web.url.startswith("https://patentscope.wipo.int/search/zh/result.jsf"):
@@ -212,6 +213,11 @@ def loop_get_page_html():
                             break
                     except Exception:
                         traceback.print_exc()
+                        err_count+=1
+                        if err_count>5:
+                            print("翻页失败，尝试重启")
+                            os.execl(sys.executable, sys.executable, *sys.argv)
+                            exit(0)
                 web.wait.load_start(timeout=10)
             else:
                 print("page",page,all_page)
