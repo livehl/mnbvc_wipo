@@ -211,10 +211,11 @@ def loop_get_page_html():
                             web.ele("@value=200").click()
                             web.ele("@value=DOUBLE_VIEW").click()
                             break
+                        time.sleep(0.5)
                     except Exception:
                         traceback.print_exc()
                         err_count+=1
-                        if err_count>5:
+                        if err_count>20:
                             print("翻页失败，尝试重启")
                             os.execl(sys.executable, sys.executable, *sys.argv)
                             exit(0)
@@ -232,7 +233,7 @@ def loop_get_page_html():
                         except Exception as e:
                             err_count+=1
                             traceback.print_exc()
-                            if err_count>5:
+                            if err_count>20:
                                 print("翻页失败，尝试重启")
                                 os.execl(sys.executable, sys.executable, *sys.argv)
                                 exit(0)
