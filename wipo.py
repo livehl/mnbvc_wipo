@@ -216,7 +216,7 @@ def loop_get_page_html():
                         traceback.print_exc()
                         err_count+=1
                         if err_count>20:
-                            print("翻页失败，尝试重启")
+                            print("搜索失败，尝试重启")
                             os.execl(sys.executable, sys.executable, *sys.argv)
                             exit(0)
                 web.wait.load_start(timeout=10)
