@@ -217,13 +217,19 @@ def loop_get_page_html():
                 print("page",page,all_page)
                 ele.click()
                 if page>0:
+                    err_count=0
                     while True:#快速翻页
                         try:
                             new_page = int(web.ele('.ps-paginator--page--value',timeout=5).raw_text.replace('\n', '').split("/")[0])
                             if new_page !=page:break
                             time.sleep(0.3)
                         except Exception as e:
+                            err_count+=1
                             traceback.print_exc()
+                            if err_count>5:
+                                print("翻页失败，尝试重启")
+                                os.execl(sys.executable, sys.executable, *sys.argv)
+                                exit(0)
                 else:
                     web.wait.load_start(timeout=10)
         else:
