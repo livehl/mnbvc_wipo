@@ -181,7 +181,7 @@ def loop_get_page_html():
             try:
                 raw_page=web.ele('.ps-paginator--page--value',timeout=1).raw_text.replace('\n', '')
                 page = int(raw_page.split("/")[0])
-                all_page=int(raw_page.split("/")[1])
+                all_page=int(raw_page.split("/")[1].replace(',', '').replace('，', ''))
                 STAT_DICT[ipc_]['page']=page
                 STAT_DICT[ipc_]['all_page']=all_page
                 save_status()
