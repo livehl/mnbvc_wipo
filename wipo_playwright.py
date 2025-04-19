@@ -151,6 +151,10 @@ def page_init(web,ipc):
     web.click('#simpleSearchForm\\:fpSearch\\:buttons')
     web.wait_for_load_state('networkidle')
     print("double")
+    count=web.query_selector(".results-count").text_content().split(" ")[0].replace(",","")
+    print("count",count)
+    if int(count)==0:
+        return page_init(web,get_next_ipc())
     web.click("#resultListCommandsForm\\:viewType\\:input")
     time.sleep(1)
     web.select_option("#resultListCommandsForm\\:viewType\\:input", value="双")  # DOUBLE_VIEW
@@ -160,10 +164,11 @@ def page_init(web,ipc):
     time.sleep(1)
     web.select_option("#resultListCommandsForm\\:perPage\\:input", value="200")
     web.wait_for_load_state('networkidle')
+    return ipc
 def loop_get_page_html():
     """页面爬取"""
     ipc_ = get_next_ipc()
-    page_init(web,ipc_)
+    ipc_=page_init(web,ipc_)
     if ipc_ in STAT_DICT:#恢复页面
         print(STAT_DICT[ipc_])
         if STAT_DICT[ipc_]['page']<99 and STAT_DICT[ipc_]['page']>2 and STAT_DICT[ipc_]['all_page']>2:
@@ -205,7 +210,7 @@ def loop_get_page_html():
                 while True:#一直重试
                     try:
                         if not web.url.startswith("https://patentscope.wipo.int/search/zh/result.jsf"):
-                            page_init(web, ipc_)
+                            ipc_=page_init(web, ipc_)
                             break
                         else:
                             web.fill('#advancedSearchForm\\:advancedSearchInput\\:input', ipc_)
@@ -223,13 +228,14 @@ def loop_get_page_html():
                             print("搜索失败，尝试重启")
                             os.execl(sys.executable, sys.executable, *sys.argv)
                             exit(0)
-                web.wait_for_load_state('networkidle')
+                web.wait_for_load_state('networkidle',timeout=60)
             else:
                 print("page",page,all_page)
                 web.click('xpath=//a[@aria-label="下一页"]')
-                web.wait_for_load_state('networkidle')
+                web.wait_for_load_state('networkidle',timeout=60)
                 if page>0:
                     err_count=0
+                    ts=time.time()
                     while True:#快速翻页
                         try:
                             new_page = int(
@@ -237,6 +243,8 @@ def loop_get_page_html():
                                     "/")[0])
                             if new_page != page: break
                             time.sleep(0.3)
+                            if time.time()-ts >180:
+                                raise Exception("翻页超时")
                         except Exception as e:
                             err_count+=1
                             traceback.print_exc()
@@ -245,7 +253,7 @@ def loop_get_page_html():
                                 os.execl(sys.executable, sys.executable, *sys.argv)
                                 exit(0)
                 else:
-                    web.wait_for_load_state('networkidle')
+                    web.wait_for_load_state('networkidle',timeout=60)
         else:
             print("队列已满，生产者等待...")
         time.sleep(random.randint(1,10)/10)
