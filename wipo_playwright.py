@@ -3,6 +3,7 @@ import random
 import time
 import queue
 import traceback
+import subprocess
 
 import json
 import os
@@ -164,6 +165,7 @@ def page_init(web,ipc):
     time.sleep(1)
     web.select_option("#resultListCommandsForm\\:perPage\\:input", value="200")
     web.wait_for_load_state('networkidle')
+    time.sleep(2)
     return ipc
 def loop_get_page_html():
     """页面爬取"""
@@ -171,15 +173,18 @@ def loop_get_page_html():
     ipc_=page_init(web,ipc_)
     if ipc_ in STAT_DICT:#恢复页面
         print(STAT_DICT[ipc_])
-        if STAT_DICT[ipc_]['page']<99 and STAT_DICT[ipc_]['page']>2 and STAT_DICT[ipc_]['all_page']>2:
-            print(f"恢复: {STAT_DICT[ipc_]['page']}")
-            web.click('xpath=//a[@aria-label="单击以转至特定页面"]')
-            time.sleep(0.5)
-            web.fill("xpath=/html/body/div[2]/div[2]/div/div/div/form/input[2]", str(STAT_DICT[ipc_]['page'] - 1))
-            time.sleep(0.5)
-            web.click("xpath=/html/body/div[2]/div[2]/div/div/div/form/button")
-            time.sleep(1)
-            web.wait_for_load_state('networkidle')
+        # if STAT_DICT[ipc_]['page']<99 and STAT_DICT[ipc_]['page']>2 and STAT_DICT[ipc_]['all_page']>2:
+        #     print(f"恢复: {STAT_DICT[ipc_]['page']}")
+        #     web.click('xpath=//a[@aria-label="单击以转至特定页面"]')
+        #     time.sleep(0.5)
+        #     page=str(STAT_DICT[ipc_]['page'] - 1)
+        #     web.fill("xpath=/html/body/div[2]/div[2]/div/div/div/form/input[2]",page[:-1])
+        #     time.sleep(1)
+        #     web.press("xpath=/html/body/div[2]/div[2]/div/div/div/form/input[2]",page[-1])
+        #     time.sleep(0.5)
+        #     web.click("xpath=/html/body/div[2]/div[2]/div/div/div/form/button")
+        #     time.sleep(1)
+        #     web.wait_for_load_state('networkidle')
     while True:
         if True:
             q.put((web.content(), ipc_), block=False)
@@ -226,7 +231,7 @@ def loop_get_page_html():
                         err_count+=1
                         if err_count>20:
                             print("搜索失败，尝试重启")
-                            os.execl(sys.executable, sys.executable, *sys.argv)
+                            subprocess.run([sys.executable] + sys.argv)
                             exit(0)
                 web.wait_for_load_state('networkidle',timeout=60)
             else:
